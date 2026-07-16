@@ -26,6 +26,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs" / "system"
 GPS_LOG_DIR = BASE_DIR / "logs" / "gps"
+NETWORK1_LOG_DIR = BASE_DIR / "logs" / "network1"
 
 RESTART_BACKOFF_S = 10
 POLL_INTERVAL_S = 2
@@ -54,16 +55,28 @@ def build_modules():
             ],
             "restart_on_exit": True,
         },
-        # --- add future modules the same way, e.g.: ---
+        {
+            "name": "network1",
+            "cmd": [
+                sys.executable,
+                "-u",
+                str(BASE_DIR / "modules" / "network" / "net_logger.py"),
+                "--port",
+                "/dev/ttyUSB4",
+                "--outdir",
+                str(NETWORK1_LOG_DIR),
+            ],
+            "restart_on_exit": True,
+        },
+        # --- add network2/3/4 and v2x the same way once ready, e.g.: ---
         # {
-        #     "name": "network1",
+        #     "name": "network2",
         #     "cmd": [sys.executable, "-u",
         #             str(BASE_DIR / "modules" / "network" / "net_logger.py"),
-        #             "--modem", "/dev/ttyUSB0",
-        #             "--outdir", str(BASE_DIR / "logs" / "network1")],
+        #             "--port", "/dev/ttyUSBx",
+        #             "--outdir", str(BASE_DIR / "logs" / "network2")],
         #     "restart_on_exit": True,
         # },
-        # {"name": "network2", "cmd": [...], "restart_on_exit": True},
         # {"name": "network3", "cmd": [...], "restart_on_exit": True},
         # {"name": "network4", "cmd": [...], "restart_on_exit": True},
         # {"name": "v2x",      "cmd": [...], "restart_on_exit": True},
@@ -103,6 +116,7 @@ class Supervisor:
     def start_all(self):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         GPS_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        NETWORK1_LOG_DIR.mkdir(parents=True, exist_ok=True)
         for module in self.modules:
             self.start(module)
 
