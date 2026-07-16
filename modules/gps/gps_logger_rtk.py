@@ -35,7 +35,12 @@ from collections import Counter
 import serial
 from pyubx2 import UBXReader, UBX_PROTOCOL
 
-from ntrip2 import stream_corrections, NTRIP_SERVER, NTRIP_PORT, NTRIP_MOUNTPOINT
+from ntrip2 import (
+    stream_corrections,
+    NTRIP_SERVER,
+    NTRIP_PORT,
+    NTRIP_MOUNTPOINT,
+)
 
 FIELDS = [
     "log_time_utc",
