@@ -1,0 +1,1 @@
+# 6G, CAM and V2X experiment setup
