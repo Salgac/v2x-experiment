@@ -32,11 +32,11 @@ from dotenv import load_dotenv
 
 load_dotenv()  # reads a .env file in the current working directory
 
-NTRIP_SERVER = os.getenv("NTRIP_SERVER", "195.28.70.16")
+NTRIP_SERVER = os.getenv("NTRIP_SERVER", "skpos.gku.sk")
 NTRIP_PORT = int(os.getenv("NTRIP_PORT", "2102"))
 NTRIP_MOUNTPOINT = os.getenv("NTRIP_MOUNTPOINT", "BRAT3")
-NTRIP_USER = os.getenv("USER", "")
-NTRIP_PASSWORD = os.getenv("PASSWORD", "")
+NTRIP_USER = os.getenv("NTRIP_USER", "")
+NTRIP_PASSWORD = os.getenv("NTRIP_PASSWORD", "")
 
 DEFAULT_SERIAL_PORT = os.getenv("UBLOX_USB_PORT", "/dev/ttyACM0")
 
