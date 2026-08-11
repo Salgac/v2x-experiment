@@ -1,0 +1,24 @@
+# Template -- copy to /etc/systemd/system/ups-monitor.service, fix paths/user,
+# then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable ups-monitor
+#   sudo systemctl start ups-monitor
+#
+# Runs alongside the main v2x-experiment.service (main.py) -- this one just
+# watches for power loss and triggers modules/shutdown_sequence.sh, which
+# stops main.py's modules cleanly, syncs, and powers off.
+
+[Unit]
+Description=UPS power-loss monitor (triggers graceful shutdown sequence)
+After=multi-user.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/dominik/v2x-experiment
+ExecStart=/usr/bin/python3 /home/dominik/v2x-experiment/modules/ups/ups_monitor.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
