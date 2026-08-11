@@ -1,0 +1,15 @@
+[Unit]
+Description=v2x-experiment logging stack (GPS, network, V2X)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dominik
+WorkingDirectory=/home/dominik/v2x-experiment
+ExecStart=/usr/bin/python3 -u /home/dominik/v2x-experiment/main.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
