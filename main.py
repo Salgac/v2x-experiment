@@ -17,6 +17,7 @@ cleanly (closing their CSV files etc.) before this process exits.
 """
 
 import datetime as dt
+import glob
 import signal
 import subprocess
 import sys
@@ -31,6 +32,14 @@ NETWORK1_LOG_DIR = BASE_DIR / "logs" / "network1"
 RESTART_BACKOFF_S = 10
 POLL_INTERVAL_S = 2
 SHUTDOWN_TIMEOUT_S = 10
+
+
+def by_id(pattern, fallback):
+    """Stable device path from /dev/serial/by-id/ (doesn't change when
+    /dev/ttyUSB*/ttyACM* numbering shifts across reboots or when other USB
+    devices are plugged in). Falls back to the old fixed path if no match."""
+    hits = sorted(glob.glob(f"/dev/serial/by-id/{pattern}"))
+    return hits[0] if hits else fallback
 
 
 def build_modules():
@@ -49,7 +58,8 @@ def build_modules():
                 "-u",
                 str(BASE_DIR / "modules" / "gps" / "gps_logger_rtk.py"),
                 "--port",
-                "/dev/ttyACM0",
+                # ZED-F9P native USB (CDC-ACM) port
+                by_id("*u-blox_GNSS_receiver*", "/dev/ttyACM0"),
                 "--outdir",
                 str(GPS_LOG_DIR),
             ],
@@ -60,9 +70,11 @@ def build_modules():
             "cmd": [
                 sys.executable,
                 "-u",
-                str(BASE_DIR / "modules" / "network" / "net_logger.py"),
+                str(BASE_DIR / "modules" / "network" / "qnet_logger.py"),
                 "--port",
-                "/dev/ttyUSB4",
+                # Quectel RM530N-GL: if02 = AT port (if03 = second AT port,
+                # free for manual diagnostics with modules/network/modem/at.py)
+                by_id("*Quectel*if02*", "auto"),
                 "--outdir",
                 str(NETWORK1_LOG_DIR),
             ],
@@ -72,8 +84,8 @@ def build_modules():
         # {
         #     "name": "network2",
         #     "cmd": [sys.executable, "-u",
-        #             str(BASE_DIR / "modules" / "network" / "net_logger.py"),
-        #             "--port", "/dev/ttyUSBx",
+        #             str(BASE_DIR / "modules" / "network" / "qnet_logger.py"),
+        #             "--port", "/dev/serial/by-id/usb-Quectel_..._<serial>-if02-port0",
         #             "--outdir", str(BASE_DIR / "logs" / "network2")],
         #     "restart_on_exit": True,
         # },

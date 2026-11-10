@@ -6,7 +6,8 @@ A Raspberry Pi–based mobile data logger for a university V2X research project,
 ## Status
 
 - **GPS/RTK logging: working.**
-- **Network (cellular) logging: blocked on an unresolved modem issue** — see [Known Issues](#known-issues) below. The logging code itself works; the modem currently cannot complete registration on the commercial network.
+- **Network (cellular) logging: working** with the Quectel RM530N-GL (registers on Orange SK in 5G NSA / EN-DC). `qnet_logger.py` logs LTE + NR serving-cell metrics at 1 Hz and survives modem dropouts. The original SIMCom SIM8200 could not register on the commercial network (firmware issue) and has been replaced.
+- **Modem power: unresolved** — the modem drops off USB every ~0.5–6 min when powered from the Pi; see [Known Issues](#known-issues).
 - **Power orchestration (boot-on-power, graceful shutdown, sync, auto re-boot): working**, validated end-to-end.
 - **V2X module: not yet built.** `modules/v2x/` is a placeholder for it.
 - **Scaling to 4 modems: not yet done.** The code is written to support it (see `connect_all_modems.sh`), but only one physical modem has been wired up and tested so far.
@@ -17,7 +18,7 @@ A Raspberry Pi–based mobile data logger for a university V2X research project,
 | -------------- | ---------------------------------------------- | ------------------------------- |
 | SBC            | Raspberry Pi 4B                                | Raspberry Pi OS Lite            |
 | GNSS receiver  | u-blox EVB-C099-F9P (ZED-F9P)                  | USB, RTK-capable                |
-| Cellular modem | Waveshare SIM8200EA-M2 (SIMCom SIM8200M44A-M2) | USB, AT + QMI                   |
+| Cellular modem | Waveshare 5G dongle, Quectel RM530N-GL (WS-25928) | USB 3.1, AT + QMI (`usbnet 0`)  |
 | Power          | Waveshare UPS HAT (D), 21700 Li-ion            | I2C (INA219 @ 0x43, MCU @ 0x2D) |
 
 ## Architecture
@@ -28,7 +29,7 @@ A Raspberry Pi–based mobile data logger for a university V2X research project,
 bus power on
     -> UPS HAT boots the Pi (hardware feature, arm/re-arm each cycle via modules/ups)
     -> systemd starts v2x-experiment.service (main.py) and ups-monitor.service
-    -> main.py launches gps_logger.py and net_logger.py as subprocesses
+    -> main.py launches gps_logger_rtk.py and qnet_logger.py as subprocesses
     -> ups_monitor.py watches battery charge/discharge direction over I2C
 
 bus power off
@@ -63,13 +64,15 @@ v2x-experiment/
 │   ├── sync_and_cleanup.sh          rsync + verify-before-delete
 │   │
 │   ├── gps/
-│   │   ├── gps_logger.py            (?) confirm which of these two is live -- see note above
-│   │   ├── gps_logger_rtk.py        (?)
-│   │   └── ntrip2.py                RTK correction client (NTRIP) -- confirm import matches this name
+│   │   ├── gps_logger.py            older logger without RTK (not used by main.py)
+│   │   ├── gps_logger_rtk.py        live GNSS logger (NAV-PVT + NTRIP/RTK)
+│   │   └── ntrip2.py                RTK correction client (NTRIP)
 │   │
 │   ├── network/
-│   │   ├── net_logger.py            continuous AT-layer network parameter logger
+│   │   ├── qnet_logger.py           live LTE/NR logger for Quectel modems (AT+QENG)
+│   │   ├── net_logger.py            older generic AT logger (CSQ/COPS/CREG only, not used)
 │   │   └── modem/
+│   │       ├── at.py                    send AT commands, print responses (diagnostics)
 │   │       ├── connect_and_verify.sh    QMI-native modem bring-up + connectivity check
 │   │       ├── connect_all_modems.sh    runs connect_and_verify.sh across all modems
 │   │       ├── diagnose.sh              one-shot read-only AT+QMI status dump
@@ -102,7 +105,7 @@ v2x-experiment/
    ```
 4. **Configure secrets**: `cp .env.example .env`, fill in NTRIP credentials and lab server sync details.
 5. **GPS**: run `config/configure_receiver.py` once (enables NAV-PVT output on the receiver's USB port, needed since it's off by default).
-6. **Network**: find the modem's AT port (`modules/network/net_logger.py --probe`), unlock the SIM if needed (`modules/network/modem/unlock_sim.py`), confirm registration (`modules/network/modem/connect_and_verify.sh`) — currently blocked, see Known Issues.
+6. **Network**: check the modem shows up (`ls /dev/serial/by-id/` -> `usb-Quectel_RM530N-GL_<serial>-if00..if03-port0`; `if02` is the AT port used by the logger, `if03` is free for diagnostics). Confirm SIM and registration: `python3 modules/network/modem/at.py /dev/serial/by-id/...-if03-port0 'AT+CPIN?' 'AT+COPS?' 'AT+QENG="servingcell"'`.
 7. **UPS**: run `config/enable_autoboot.py` once. Verify the charge/discharge sign convention with `modules/ups/ups_monitor.py --test` before trusting it (confirmed on this specific unit: **negative = charging, positive = discharging** — already set correctly in the script, but worth re-checking if the HAT is ever swapped).
 8. **Install as services**: `sudo ./install.sh` — registers both `main.py` and `ups_monitor.py` as systemd services that start on boot and restart on failure.
 9. **Test the full cycle before deploying**: power on normally, confirm both services are running (`systemctl status v2x-experiment ups-monitor`), then pull power and watch the whole shutdown chain complete, then reconnect power and confirm it boots again.
@@ -113,7 +116,8 @@ v2x-experiment/
 cd ~/v2x-experiment
 python3 main.py                                          # runs everything main.py knows about
 python3 modules/gps/gps_logger_rtk.py --debug             # GPS module alone (confirm this is the live one -- see note above)
-python3 modules/network/net_logger.py --probe             # find the modem's AT port
+python3 modules/network/qnet_logger.py --debug            # network module alone (auto-detects the Quectel AT port)
+python3 modules/network/modem/at.py <port> 'AT+QENG="servingcell"'   # one-off AT query
 sudo modules/network/modem/connect_and_verify.sh          # bring up + verify one modem
 sudo modules/network/modem/connect_all_modems.sh          # same, across all configured modems
 sudo modules/network/modem/diagnose.sh                    # full read-only AT+QMI status dump
@@ -121,18 +125,16 @@ sudo modules/network/modem/diagnose.sh                    # full read-only AT+QM
 
 ## Known Issues
 
-> **Check this first**: `main.py`'s `build_modules()` has a hardcoded path to the GPS logger script. Confirm it points at whichever of `gps_logger.py` / `gps_logger_rtk.py` is actually the live one (see the note at the top of the directory layout above) — if it's pointing at the stale file, GPS logging would silently run old/wrong code under `main.py` even though manual testing of the other file looks fine.
+### Modem drops off USB when powered from the Pi (unresolved)
 
-### Cellular modem cannot register on the commercial network (unresolved)
+On 2026-11-10 the RM530N-GL, plugged directly into a Pi USB 3.0 port, disconnected and re-enumerated 11 times in ~27 min of uptime (`dmesg`: `usb 2-1: USB disconnect`), at irregular intervals (20 s – 6 min), and 6 times during a 6-min logging test even when untouched. Each dropout takes ~20 s until the modem answers AT again, so roughly a third of the samples were lost. `vcgencmd get_throttled` reported `0x50000` (under-voltage has occurred since boot). Irregular timing + under-voltage point to insufficient USB power for the 5G modem's transmit current peaks (the Pi 4 has ~1.2 A shared across all USB ports; the Pi itself is fed through the UPS HAT pogo pins).
 
-The SIM8200M44A-M2 (firmware `B02V04_210826`, ~2021) was previously configured for **SA-only 5G** operation against a private open5gs core. Slovakia's public networks only offer **NSA** (LTE+NR dual connectivity) — there is no public SA deployment here. Despite extensive, systematic reconfiguration across both the AT-command layer and the QMI layer, the modem still cannot complete registration on Orange SK with the same SIM:
+- **Next step**: test with a powered USB 3.0 hub. A powered hub is needed for 4 modems anyway, and it must stay on the UPS/battery during the shutdown flush.
+- `qnet_logger.py` already survives these dropouts (writes `modem_lost` / `modem_up` event rows, waits for the port and continues), so the data shows exactly where the gaps are.
 
-- **Confirmed NOT the cause**: SIM/account/coverage (works perfectly in a phone at the same location — full LTE band 20 + 5G NSA), SIM PIN state, band restrictions (`AT+CNBP` and `AT+CSYSSEL` both fully decoded and confirmed wide-open, including LTE band 20 and broad NR SA/NSA bands), RAT acquisition order, carrier/network personalization locks (all confirmed inactive via `AT+CLCK`), and `qmicli`'s "technology preference" / "mode preference" (confirmed set correctly to `lte, 5gnr` via read-back).
-- **What we can see**: `qmicli --nas-get-system-info` consistently shows `LTE service: Status: 'none'` while `5G SA service` reaches `'limited'` (camps on a real NR cell, gets a valid Tracking Area Code) and then stalls — the modem appears to structurally never attempt an LTE-anchored NSA attach, regardless of configuration.
-- **Next step**: a detailed support request has been sent to SIMCom (`support@simcom.com`) with the full diagnostic history. A deep-capture debugging attempt via `scat` (Qualcomm DIAG protocol capture) was planned but not completed.
-- Full diagnostic history, every command tried, and reasoning is preserved in this project's chat history / a `TROUBLESHOOTING.md` if one has been written since.
+### Previous modem (SIMCom SIM8200EA-M2) could not register -- resolved by replacement
 
-**Practical implication**: `net_logger.py` itself works correctly and will log real data the moment registration succeeds — this is a modem/firmware issue, not a code issue. `PLMN` in `connect_and_verify.sh` defaults to `automatic`; it was briefly pinned manually to Orange's PLMN (`23101`) during debugging but that wasn't the fix and isn't appropriate as a default across different carriers on future modems.
+The SIM8200M44A-M2 (firmware `B02V04_210826`) never completed registration on Orange SK (only NSA is deployed in Slovakia; the modem stalled at 5G SA "limited service"). It was replaced by the Quectel RM530N-GL, which registered on the same network in EN-DC (5G NSA) out of the box. The SIMCom-specific notes in `modules/network/modem/connect_and_verify.sh` describe that old debugging and no longer apply as-is.
 
 ### UPS boot-on-power-connect may need re-arming every cycle
 
@@ -146,8 +148,10 @@ Waveshare's documented register write (`0x55` to register `0x01` at I2C address 
 
 ## Next steps
 
-- Resolve the modem registration issue (pending SIMCom's reply).
-- Wire up modems 2-4: fill in their entries in `connect_all_modems.sh`'s `MODEMS` array once physically installed, using `net_logger.py --probe` and `diagnose.sh` per modem the same way modem 1 was brought up.
+- Fix modem power (powered USB hub) and re-run the dropout test.
+- Wire up modems 2-4: fill in their entries in `connect_all_modems.sh`'s `MODEMS` array once physically installed, using `ls /dev/serial/by-id/` and `modules/network/modem/at.py` per modem; add matching `network2..4` entries in `main.py` (each with its own `/dev/serial/by-id/...-if02-port0`).
 - Build the V2X module (`modules/v2x/`).
-- Solve persistent device naming (`/dev/ttyUSB*`/`/dev/ttyACM*` numbering shifts across reboots and when other USB devices are plugged in) via `udev` rules keyed to physical USB port path — deferred earlier, now more urgent with 4 modems planned.
+- Device naming: `main.py` now uses `/dev/serial/by-id/` paths (stable across reboots, keyed to device serial). If 4 identical modems ever need to be tied to fixed physical USB ports instead, add `udev` rules keyed to the port path.
+- Bring up the data session over `wwan0` (QMI) without overriding the Pi's Wi-Fi default route (policy routing per modem), for active measurements (latency/throughput). Note: in idle (`NOCONN`) the NR leg is only measured opportunistically, so continuous light traffic is needed to measure connected-mode metrics.
+- Time sync from GNSS (gpsd + chrony, ideally PPS): the Pi has no RTC and restores a stale time at boot (seen in `orchestrator.log`).
 - Verify UPS battery runtime against real sync/shutdown timing — `shutdown_sequence.sh` currently doesn't enforce a time budget against the battery running out mid-sync.

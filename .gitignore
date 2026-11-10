@@ -1,2 +1,9 @@
 .env
 __pycache__/
+# runtime data -- never commit measurement logs
+logs/**/*.csv
+logs/**/*.log
+logs/*.csv
+modules/**/logs/
+sync_history/
+shutdown_sequence.log
