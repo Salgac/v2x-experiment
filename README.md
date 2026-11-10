@@ -106,7 +106,7 @@ v2x-experiment/
 4. **Configure secrets**: `cp .env.example .env`, fill in NTRIP credentials and lab server sync details.
 5. **GPS**: run `config/configure_receiver.py` once (enables NAV-PVT output on the receiver's USB port, needed since it's off by default).
 6. **Network**: check the modem shows up (`ls /dev/serial/by-id/` -> `usb-Quectel_RM530N-GL_<serial>-if00..if03-port0`; `if02` is the AT port used by the logger, `if03` is free for diagnostics). Confirm SIM and registration: `python3 modules/network/modem/at.py /dev/serial/by-id/...-if03-port0 'AT+CPIN?' 'AT+COPS?' 'AT+QENG="servingcell"'`.
-7. **UPS**: run `config/enable_autoboot.py` once. Verify the charge/discharge sign convention with `modules/ups/ups_monitor.py --test` before trusting it (confirmed on this specific unit: **negative = charging, positive = discharging** — already set correctly in the script, but worth re-checking if the HAT is ever swapped).
+7. **UPS**: run `config/enable_autoboot.py` once. Power-loss behaviour is tunable: `ups_monitor.py --threshold 900 --grace-s 300 --low-v 3.5` (defaults; change `ExecStart` in the service to override). Verify the charge/discharge sign convention with `modules/ups/ups_monitor.py --test` before trusting it (confirmed on this specific unit: **negative = charging, positive = discharging** — already set correctly in the script, but worth re-checking if the HAT is ever swapped).
 8. **Install as services**: `sudo ./install.sh` — registers both `main.py` and `ups_monitor.py` as systemd services that start on boot and restart on failure.
 9. **Test the full cycle before deploying**: power on normally, confirm both services are running (`systemctl status v2x-experiment ups-monitor`), then pull power and watch the whole shutdown chain complete, then reconnect power and confirm it boots again.
 
@@ -138,6 +138,8 @@ Found on 2026-11-10: `ups-monitor.service` was `inactive (dead)` minutes after b
 1. **Sign-only detection.** With a full battery the shunt reading hovers around zero (-3..+2) and flips sign randomly; three positive readings in a row were taken as "power lost". Now a threshold is used (`raw > 900`, measured: noise -3..+40 with full battery, ~100..730 right after re-plugging, 1200..1900 with power actually removed).
 2. **Shutdown script not executable** (`-rw-rw-r--`), so `sudo shutdown_sequence.sh` failed silently -- a real power loss would not have been handled either. Now invoked via `bash`, and the executable bit is set in git.
 3. **`Restart=on-failure`** + the monitor exiting with code 0 after triggering = never restarted. Now `Restart=always`, and the monitor keeps running if the shutdown script returns.
+
+**Grace period + low-battery cutoff** (added after the fix above): a detected power loss no longer shuts down right away. The Pi keeps running and logging on battery for `--grace-s` (default 300 s) and only then shuts down; power returning within that time cancels it (short engine-off stops, engine restarts). Independently, it shuts down at once if the battery voltage stays below `--low-v` (default 3.5 V) for 3 readings, so the Pi never dies with a hard power cut. Tested on the Pi on 2026-11-10 (before the grace period existed): a ~4 s unplug was logged (`1/3`) and reset with no shutdown; a ~12 s unplug ran the full shutdown sequence and the Pi booted again on its own when power returned.
 
 Also: stdout was buffered (all journal lines got the same timestamp at exit) -- now `python3 -u` + per-line timestamps. Paths are derived from the script location instead of `/home/dominik/...`.
 
