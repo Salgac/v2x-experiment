@@ -16,8 +16,10 @@ After=multi-user.target
 Type=simple
 User=root
 WorkingDirectory=/home/dominik/v2x-experiment
-ExecStart=/usr/bin/python3 /home/dominik/v2x-experiment/modules/ups/ups_monitor.py
-Restart=on-failure
+ExecStart=/usr/bin/python3 -u /home/dominik/v2x-experiment/modules/ups/ups_monitor.py
+# always: the old version exited with code 0 after a (false) trigger and,
+# with Restart=on-failure, was never restarted -- leaving no protection.
+Restart=always
 RestartSec=10
 
 [Install]

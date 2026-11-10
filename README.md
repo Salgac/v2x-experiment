@@ -132,6 +132,17 @@ On 2026-11-10 the RM530N-GL, plugged directly into a Pi USB 3.0 port, disconnect
 - **Next step**: test with a powered USB 3.0 hub. A powered hub is needed for 4 modems anyway, and it must stay on the UPS/battery during the shutdown flush.
 - `qnet_logger.py` already survives these dropouts (writes `modem_lost` / `modem_up` event rows, waits for the port and continues), so the data shows exactly where the gaps are.
 
+### UPS monitor: false power-loss trigger, shutdown never ran (fixed in code, needs redeploy)
+
+Found on 2026-11-10: `ups-monitor.service` was `inactive (dead)` minutes after boot, so there was no power-loss protection at all. Three bugs combined:
+1. **Sign-only detection.** With a full battery the shunt reading hovers around zero (-3..+2) and flips sign randomly; three positive readings in a row were taken as "power lost". Now a threshold is used (`raw > 900`, measured: noise -3..+40 with full battery, ~100..730 right after re-plugging, 1200..1900 with power actually removed).
+2. **Shutdown script not executable** (`-rw-rw-r--`), so `sudo shutdown_sequence.sh` failed silently -- a real power loss would not have been handled either. Now invoked via `bash`, and the executable bit is set in git.
+3. **`Restart=on-failure`** + the monitor exiting with code 0 after triggering = never restarted. Now `Restart=always`, and the monitor keeps running if the shutdown script returns.
+
+Also: stdout was buffered (all journal lines got the same timestamp at exit) -- now `python3 -u` + per-line timestamps. Paths are derived from the script location instead of `/home/dominik/...`.
+
+Open question: after unplugging and re-plugging the HAT's power input, the reading stayed at ~300-600 (battery still supplying part of the load) instead of returning to ~0, while battery voltage stayed at 4.17 V. Check whether the adapter delivers enough current for Pi + 5G modem (ties in with the modem USB dropouts above).
+
 ### Previous modem (SIMCom SIM8200EA-M2) could not register -- resolved by replacement
 
 The SIM8200M44A-M2 (firmware `B02V04_210826`) never completed registration on Orange SK (only NSA is deployed in Slovakia; the modem stalled at 5G SA "limited service"). It was replaced by the Quectel RM530N-GL, which registered on the same network in EN-DC (5G NSA) out of the box. The SIMCom-specific notes in `modules/network/modem/connect_and_verify.sh` describe that old debugging and no longer apply as-is.

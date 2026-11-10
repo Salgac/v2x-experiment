@@ -9,7 +9,7 @@
 # signal is needed after shutdown -h now -- see that line below for why.
 #
 set -u
-PROJECT_DIR="/home/dominik/v2x-experiment"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHUTDOWN_LOG="$PROJECT_DIR/shutdown_sequence.log"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%S)] $*" | tee -a "$SHUTDOWN_LOG"; }
@@ -36,7 +36,7 @@ if [ "$exited" -ne 1 ]; then
 fi
 
 log "Running sync and cleanup..."
-if SYNC_SERVER="${SYNC_SERVER:-}" "$PROJECT_DIR/modules/sync_and_cleanup.sh" >>"$SHUTDOWN_LOG" 2>&1; then
+if SYNC_SERVER="${SYNC_SERVER:-}" PROJECT_DIR="$PROJECT_DIR" bash "$PROJECT_DIR/modules/sync_and_cleanup.sh" >>"$SHUTDOWN_LOG" 2>&1; then
     log "Sync and cleanup completed -- logs are on the server and cleared locally."
 else
     log "Sync and cleanup did not complete (no network right now, or verification "
